@@ -5,7 +5,12 @@ Waves & Modern Physics
 
 import streamlit as st
 import time
+import sys
+import os
 import plotly.graph_objects as go
+
+# Ensure local modules are importable on Streamlit Cloud
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from questions import QUESTION_BANK
 from engine import (
