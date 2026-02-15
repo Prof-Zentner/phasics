@@ -95,4 +95,17 @@ def check_answer(question: dict, answer) -> bool:
             1 for kw in question["rubric"] if kw.lower() in answer_lower
         )
         return matched >= math.ceil(len(question["rubric"]) * 0.5)
+    elif question["type"] == "math_input":
+        # Math input is evaluated by keyword matching + AI tutor review
+        if not answer or not answer.strip():
+            return False
+        answer_lower = answer.lower().replace(" ", "")
+        matched = sum(
+            1 for kw in question.get("eval_keywords", [])
+            if kw.lower().replace(" ", "") in answer_lower
+        )
+        return matched >= math.ceil(len(question.get("eval_keywords", [])) * 0.5)
+    elif question["type"] == "drawing":
+        # Drawing is evaluated by AI — return None to signal AI eval needed
+        return None
     return False

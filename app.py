@@ -20,7 +20,14 @@ from engine import (
     get_topic_breakdown,
     check_answer,
 )
-from tutor import get_tutor_response
+from tutor import get_tutor_response, evaluate_drawing, evaluate_math_input
+
+# Try importing drawable canvas
+try:
+    from streamlit_drawable_canvas import st_canvas
+    HAS_CANVAS = True
+except ImportError:
+    HAS_CANVAS = False
 
 # ─── Page Config ───
 st.set_page_config(
@@ -476,25 +483,139 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
             )
             st.caption(f"💡 Key concepts to address: {', '.join(q.get('rubric', []))}")
 
+        elif q["type"] == "drawing":
+            st.markdown(
+                f"<p style='color: #c4b5fd; font-size: 0.85rem; margin-bottom: 0.5rem;'>🎨 <strong>Drawing prompt:</strong> {q.get('drawing_prompt', q['question'])}</p>",
+                unsafe_allow_html=True,
+            )
+
+            if HAS_CANVAS:
+                # Drawing tools
+                tool_cols = st.columns([1, 1, 1, 1])
+                with tool_cols[0]:
+                    drawing_mode = st.selectbox(
+                        "Tool",
+                        ["freedraw", "line", "circle", "rect"],
+                        key=f"tool_{q['id']}",
+                        format_func=lambda x: {"freedraw": "✏️ Pen", "line": "📏 Line", "circle": "⭕ Circle", "rect": "⬜ Rectangle"}.get(x, x),
+                    )
+                with tool_cols[1]:
+                    stroke_color = st.color_picker("Color", "#60a5fa", key=f"color_{q['id']}")
+                with tool_cols[2]:
+                    stroke_width = st.slider("Width", 1, 8, 3, key=f"width_{q['id']}")
+                with tool_cols[3]:
+                    bg_color = "#1a1a2e"
+
+                canvas_result = st_canvas(
+                    fill_color="rgba(0, 0, 0, 0)",
+                    stroke_width=stroke_width,
+                    stroke_color=stroke_color,
+                    background_color=bg_color,
+                    height=350,
+                    width=700,
+                    drawing_mode=drawing_mode,
+                    key=f"canvas_{q['id']}",
+                    display_toolbar=True,
+                )
+
+                st.caption("💡 Use the toolbar above the canvas to undo or clear. Draw clearly — your sketch will be evaluated by AI.")
+
+                # Store canvas data in session state
+                if canvas_result and canvas_result.image_data is not None:
+                    st.session_state[f"drawing_{q['id']}"] = canvas_result.image_data
+            else:
+                st.warning("Drawing canvas not available. Install `streamlit-drawable-canvas` for drawing features.")
+                st.markdown("**Alternative:** Describe your drawing in words below:")
+                answer = st.text_area(
+                    "Describe your drawing:",
+                    key=f"draw_text_{q['id']}",
+                    height=150,
+                    placeholder="Describe what you would draw...",
+                )
+
+        elif q["type"] == "math_input":
+            st.markdown(
+                """<p style='color: #888; font-size: 0.8rem; margin-bottom: 0.5rem;'>
+                ✍️ Type your mathematical expression below. Use standard notation:<br>
+                <code>√(x)</code> for square root · <code>x^2</code> for powers · <code>π</code> or <code>pi</code> for pi · <code>ω</code> or <code>omega</code> for omega<br>
+                <code>sin(x)</code>, <code>cos(x)</code> for trig · <code>Δx</code> or <code>delta_x</code> for delta
+                </p>""",
+                unsafe_allow_html=True,
+            )
+
+            math_answer = st.text_area(
+                "Your mathematical expression / derivation:",
+                key=f"math_{q['id']}",
+                height=120,
+                placeholder="e.g., x(t) = A cos(ωt + φ)  or  v(t) = -Aω sin(ωt + φ)",
+            )
+
+            if q.get("expected_form"):
+                st.caption(f"💡 Expected form example: `{q['expected_form']}`")
+
         st.markdown("")
         if st.button("Submit Answer", type="primary", use_container_width=True):
             # Get the answer based on type
             if q["type"] == "multiple_choice":
                 user_answer = st.session_state.get(f"mc_{q['id']}", None)
+                correct = check_answer(q, user_answer)
+                ai_feedback = None
+
             elif q["type"] == "numerical":
                 user_answer = st.session_state.get(f"num_{q['id']}", None)
-            else:
-                user_answer = st.session_state.get(f"concept_{q['id']}", "")
+                correct = check_answer(q, user_answer)
+                ai_feedback = None
 
-            correct = check_answer(q, user_answer)
+            elif q["type"] == "conceptual":
+                user_answer = st.session_state.get(f"concept_{q['id']}", "")
+                correct = check_answer(q, user_answer)
+                ai_feedback = None
+
+            elif q["type"] == "drawing":
+                drawing_data = st.session_state.get(f"drawing_{q['id']}", None)
+                if drawing_data is not None and HAS_CANVAS:
+                    from PIL import Image
+                    import numpy as np
+                    img = Image.fromarray(drawing_data.astype("uint8"), "RGBA")
+                    with st.spinner("🤖 AI is evaluating your drawing..."):
+                        result = evaluate_drawing(img, q, gemini_key)
+                    correct = result["correct"]
+                    ai_feedback = result["feedback"]
+                    st.session_state[f"drawing_score_{q['id']}"] = result["score"]
+                else:
+                    # Fallback to text description
+                    user_answer = st.session_state.get(f"draw_text_{q['id']}", "")
+                    correct = False
+                    ai_feedback = "Drawing canvas was not available. Try refreshing the page."
+
+            elif q["type"] == "math_input":
+                user_answer = st.session_state.get(f"math_{q['id']}", "")
+                # First do basic keyword check
+                basic_correct = check_answer(q, user_answer)
+                # Then get detailed AI evaluation if API key available
+                if gemini_key:
+                    with st.spinner("🤖 AI is reviewing your math..."):
+                        result = evaluate_math_input(user_answer, q, gemini_key)
+                    correct = result["correct"]
+                    ai_feedback = result["feedback"]
+                    st.session_state[f"math_score_{q['id']}"] = result["score"]
+                else:
+                    correct = basic_correct
+                    ai_feedback = "Add your Gemini API key in the sidebar for detailed AI evaluation of your math."
+            else:
+                user_answer = None
+                correct = False
+                ai_feedback = None
+
             st.session_state.is_correct = correct
             st.session_state.show_explanation = True
+            st.session_state[f"ai_feedback_{q['id']}"] = ai_feedback
 
             elapsed = round(time.time() - (st.session_state.question_start_time or time.time()))
             st.session_state.history.append(
                 {
                     "question_id": q["id"],
-                    "correct": correct,
+                    "correct": correct if correct is not None else False,
                     "level": q["level"],
                     "time_taken": elapsed,
                 }
@@ -519,10 +640,36 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
             st.markdown(
                 f"**Correct answer: {q['correct']} {q.get('unit', '')}**"
             )
+        elif q["type"] == "math_input" and q.get("expected_form"):
+            st.markdown(
+                f"**Expected form:** `{q['expected_form']}`"
+            )
+
+        # Show AI feedback if available (for drawing and math questions)
+        ai_feedback = st.session_state.get(f"ai_feedback_{q['id']}", None)
+        if ai_feedback:
+            st.markdown(
+                f"""<div class="{css_class}">
+                <strong>{icon} {label}</strong><br><br>
+                <strong>🤖 AI Evaluation:</strong><br>{ai_feedback}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+            # Show score for drawing/math
+            draw_score = st.session_state.get(f"drawing_score_{q['id']}", None)
+            math_score = st.session_state.get(f"math_score_{q['id']}", None)
+            score = draw_score or math_score
+            if score is not None:
+                score_color = "#4ade80" if score >= 70 else "#eab308" if score >= 40 else "#f87171"
+                st.markdown(
+                    f"<p style='font-family: Inter, sans-serif; font-size: 0.85rem;'>Score: <span style='color: {score_color}; font-weight: 700; font-size: 1.1rem;'>{score}/100</span></p>",
+                    unsafe_allow_html=True,
+                )
 
         st.markdown(
-            f"""<div class="{css_class}">
-            <strong>{icon} {label}</strong><br><br>
+            f"""<div class="{css_class}" style="margin-top: 0.5rem;">
+            <strong>📖 Full Explanation:</strong><br><br>
             {q['explanation']}
             </div>""",
             unsafe_allow_html=True,
