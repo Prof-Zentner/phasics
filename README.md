@@ -37,14 +37,22 @@ streamlit run app.py
 
 ### Gemini API Key
 
-The AI tutor requires a Gemini API key. Get one free at [ai.google.dev](https://ai.google.dev).
+The AI tutor, drawing evaluation, and math review all require a Gemini API key.
 
-Enter it in the sidebar when running the app, or set it as a Streamlit secret:
+**Get a free key:** [ai.google.dev](https://ai.google.dev)
 
+**Option A — Streamlit Secrets (recommended for deployment):**
+
+On Streamlit Community Cloud, go to your app → Settings → Secrets and add:
 ```toml
-# .streamlit/secrets.toml (for local dev — do NOT commit this)
 GEMINI_API_KEY = "your-key-here"
 ```
+
+This way students don't need to enter the key themselves.
+
+**Option B — Manual entry:**
+
+Students can enter the key in the sidebar. Click the `>` arrow in the top-left to open it.
 
 ## Tech Stack
 

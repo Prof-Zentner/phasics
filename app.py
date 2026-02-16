@@ -295,16 +295,35 @@ def open_tutor(context=None):
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
-    gemini_key = st.text_input(
+
+    # Check for Streamlit secrets first, then fall back to manual input
+    default_key = ""
+    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+        default_key = st.secrets["GEMINI_API_KEY"]
+
+    gemini_key_input = st.text_input(
         "Gemini API Key",
+        value=default_key,
         type="password",
-        help="Get a free key at ai.google.dev",
+        help="Get a free key at ai.google.dev — or set GEMINI_API_KEY in Streamlit secrets",
     )
+
+    # Store in session state so it's accessible everywhere
+    st.session_state["gemini_key"] = gemini_key_input
+
+    if gemini_key_input:
+        st.success("✓ API key set", icon="🔑")
+    else:
+        st.warning("Enter a Gemini API key for AI features (drawing eval, math review, tutor)")
+
     st.markdown("---")
     st.markdown(
         "<small style='color:#666'>λ Phasics v1.0<br>Adaptive Learning Engine</small>",
         unsafe_allow_html=True,
     )
+
+# Global reference to the key
+gemini_key = st.session_state.get("gemini_key", "")
 
 
 # ─── Header ───
@@ -573,23 +592,52 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
 
             elif q["type"] == "drawing":
                 drawing_data = st.session_state.get(f"drawing_{q['id']}", None)
+                ai_feedback = None
                 if drawing_data is not None and HAS_CANVAS:
-                    from PIL import Image
                     import numpy as np
-                    img = Image.fromarray(drawing_data.astype("uint8"), "RGBA")
-                    with st.spinner("🤖 AI is evaluating your drawing..."):
-                        result = evaluate_drawing(img, q, gemini_key)
-                    correct = result["correct"]
-                    ai_feedback = result["feedback"]
-                    st.session_state[f"drawing_score_{q['id']}"] = result["score"]
+                    from PIL import Image
+                    # Check if the canvas actually has drawing content (not just blank)
+                    img_array = drawing_data.astype("uint8")
+                    # Check alpha channel — blank canvas has uniform alpha
+                    has_content = np.any(img_array[:, :, 3] > 0) if img_array.shape[-1] == 4 else np.any(img_array > 0)
+
+                    if not has_content:
+                        correct = False
+                        ai_feedback = "It looks like the canvas is blank. Please draw your answer before submitting."
+                    elif not gemini_key:
+                        correct = False
+                        ai_feedback = "⚠️ Please enter your Gemini API key in the **sidebar** (click the `>` arrow in the top-left) to enable AI drawing evaluation."
+                    else:
+                        img = Image.fromarray(img_array, "RGBA")
+                        with st.spinner("🤖 AI is evaluating your drawing..."):
+                            result = evaluate_drawing(img, q, gemini_key)
+                        correct = result["correct"]
+                        ai_feedback = result["feedback"]
+                        st.session_state[f"drawing_score_{q['id']}"] = result["score"]
                 else:
                     # Fallback to text description
                     user_answer = st.session_state.get(f"draw_text_{q['id']}", "")
-                    correct = False
-                    ai_feedback = "Drawing canvas was not available. Try refreshing the page."
+                    if user_answer and gemini_key:
+                        # Evaluate text description via math evaluator as fallback
+                        with st.spinner("🤖 AI is evaluating your description..."):
+                            result = evaluate_math_input(
+                                user_answer,
+                                {
+                                    "question": q["question"],
+                                    "expected_form": q.get("explanation", ""),
+                                    "eval_criteria": q.get("eval_criteria", []),
+                                },
+                                gemini_key,
+                            )
+                        correct = result["correct"]
+                        ai_feedback = result["feedback"]
+                    else:
+                        correct = False
+                        ai_feedback = "Drawing canvas was not available and no description was provided."
 
             elif q["type"] == "math_input":
                 user_answer = st.session_state.get(f"math_{q['id']}", "")
+                ai_feedback = None
                 # First do basic keyword check
                 basic_correct = check_answer(q, user_answer)
                 # Then get detailed AI evaluation if API key available
@@ -601,7 +649,7 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
                     st.session_state[f"math_score_{q['id']}"] = result["score"]
                 else:
                     correct = basic_correct
-                    ai_feedback = "Add your Gemini API key in the sidebar for detailed AI evaluation of your math."
+                    ai_feedback = "⚠️ Add your Gemini API key in the **sidebar** (click the `>` arrow in the top-left) for detailed AI evaluation of your math. Using basic keyword matching for now."
             else:
                 user_answer = None
                 correct = False
