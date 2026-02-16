@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <!-- KaTeX for rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <!-- MathQuill for visual editor -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: transparent;
+            color: #e8e6f0;
+        }
+
+        /* Tab navigation */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .tab {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.03);
+            color: #888;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .tab:hover { background: rgba(255,255,255,0.06); }
+        .tab.active {
+            background: rgba(124, 58, 237, 0.2);
+            border-color: rgba(124, 58, 237, 0.4);
+            color: #c4b5fd;
+        }
+
+        /* Mode panels */
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        /* ── Visual Editor (MathQuill) ── */
+        .mq-editable-field {
+            background: rgba(255,255,255,0.05) !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+            border-radius: 10px !important;
+            padding: 14px 16px !important;
+            color: #e8e6f0 !important;
+            font-size: 18px !important;
+            min-height: 52px !important;
+        }
+        .mq-editable-field .mq-cursor { border-color: #c4b5fd !important; }
+        .mq-editable-field.mq-focused {
+            border-color: rgba(124, 58, 237, 0.5) !important;
+            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15) !important;
+        }
+
+        /* Symbol toolbar */
+        .symbol-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+        .symbol-group {
+            display: flex;
+            gap: 3px;
+            padding-right: 8px;
+            margin-right: 4px;
+            border-right: 1px solid rgba(255,255,255,0.06);
+        }
+        .symbol-group:last-child { border-right: none; }
+        .sym-btn {
+            width: 36px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.03);
+            color: #bbb;
+            cursor: pointer;
+            font-size: 15px;
+            transition: all 0.15s;
+        }
+        .sym-btn:hover {
+            background: rgba(124, 58, 237, 0.15);
+            border-color: rgba(124, 58, 237, 0.3);
+            color: #c4b5fd;
+        }
+        .sym-btn .katex { font-size: 14px !important; }
+
+        /* ── LaTeX Input ── */
+        .latex-input {
+            width: 100%;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: #e8e6f0;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 60px;
+            outline: none;
+        }
+        .latex-input:focus {
+            border-color: rgba(124, 58, 237, 0.5);
+            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
+        }
+        .preview-box {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 10px;
+            min-height: 50px;
+            text-align: center;
+        }
+        .preview-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        /* ── Handwriting Canvas ── */
+        .hw-canvas {
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            cursor: crosshair;
+            background: #1a1a2e;
+        }
+        .hw-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            align-items: center;
+        }
+        .hw-btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.04);
+            color: #aaa;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.15s;
+        }
+        .hw-btn:hover {
+            background: rgba(124, 58, 237, 0.15);
+            color: #c4b5fd;
+        }
+        .hw-btn.primary {
+            background: rgba(124, 58, 237, 0.2);
+            border-color: rgba(124, 58, 237, 0.3);
+            color: #c4b5fd;
+        }
+
+        /* Hidden output */
+        #math-output {
+            display: none;
+        }
+
+        .mode-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <!-- Tabs -->
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('visual')">🧮 Visual Editor</div>
+        <div class="tab" onclick="switchTab('latex')">📝 LaTeX Input</div>
+        <div class="tab" onclick="switchTab('handwriting')">✍️ Handwriting</div>
+    </div>
+
+    <!-- Visual Editor Panel -->
+    <div id="panel-visual" class="panel active">
+        <div class="symbol-toolbar">
+            <div class="symbol-group">
+                <div class="sym-btn" onclick="insertMQ('\\frac{}{}', true)" title="Fraction">⁄</div>
+                <div class="sym-btn" onclick="insertMQ('\\sqrt{}', true)" title="Square root">√</div>
+                <div class="sym-btn" onclick="insertMQ('\\nthroot[]{}', true)" title="nth root">ⁿ√</div>
+                <div class="sym-btn" onclick="insertMQ('^{}', true)" title="Exponent">x²</div>
+                <div class="sym-btn" onclick="insertMQ('_{}', true)" title="Subscript">x₁</div>
+            </div>
+            <div class="symbol-group">
+                <div class="sym-btn" onclick="insertMQ('\\sin')" title="sin">sin</div>
+                <div class="sym-btn" onclick="insertMQ('\\cos')" title="cos">cos</div>
+                <div class="sym-btn" onclick="insertMQ('\\tan')" title="tan">tan</div>
+                <div class="sym-btn" onclick="insertMQ('\\ln')" title="ln">ln</div>
+            </div>
+            <div class="symbol-group">
+                <div class="sym-btn" onclick="insertMQ('\\pi')" title="Pi">π</div>
+                <div class="sym-btn" onclick="insertMQ('\\omega')" title="Omega">ω</div>
+                <div class="sym-btn" onclick="insertMQ('\\lambda')" title="Lambda">λ</div>
+                <div class="sym-btn" onclick="insertMQ('\\mu')" title="Mu">μ</div>
+                <div class="sym-btn" onclick="insertMQ('\\Delta')" title="Delta">Δ</div>
+                <div class="sym-btn" onclick="insertMQ('\\phi')" title="Phi">φ</div>
+                <div class="sym-btn" onclick="insertMQ('\\theta')" title="Theta">θ</div>
+            </div>
+            <div class="symbol-group">
+                <div class="sym-btn" onclick="insertMQ('\\sum')" title="Sum">∑</div>
+                <div class="sym-btn" onclick="insertMQ('\\int')" title="Integral">∫</div>
+                <div class="sym-btn" onclick="insertMQ('\\partial')" title="Partial">∂</div>
+                <div class="sym-btn" onclick="insertMQ('\\infty')" title="Infinity">∞</div>
+                <div class="sym-btn" onclick="insertMQ('\\pm')" title="Plus minus">±</div>
+            </div>
+            <div class="symbol-group">
+                <div class="sym-btn" onclick="insertMQ('\\vec{}')" title="Vector">→</div>
+                <div class="sym-btn" onclick="insertMQ('\\hat{}')" title="Hat">â</div>
+                <div class="sym-btn" onclick="insertMQ('\\dot{}')" title="Dot (time derivative)">ẋ</div>
+                <div class="sym-btn" onclick="insertMQ('\\ddot{}')" title="Double dot">ẍ</div>
+            </div>
+            <div class="symbol-group">
+                <div class="sym-btn" onclick="insertMatrix(2,2)" title="2×2 Matrix">⊞</div>
+                <div class="sym-btn" onclick="insertMatrix(3,3)" title="3×3 Matrix">▦</div>
+                <div class="sym-btn" onclick="insertMQ('\\begin{pmatrix} \\\\ \\end{pmatrix}')" title="Column vector">( )</div>
+            </div>
+        </div>
+        <div id="mathquill-editor"></div>
+        <div class="mode-hint">Click symbols above or type directly. Use Tab to move between fields.</div>
+    </div>
+
+    <!-- LaTeX Input Panel -->
+    <div id="panel-latex" class="panel">
+        <textarea class="latex-input" id="latex-input" placeholder="Type LaTeX here, e.g.: x(t) = A \cos(\omega t + \phi)" oninput="updateLatexPreview()"></textarea>
+        <div class="preview-box">
+            <div class="preview-label">Live Preview</div>
+            <div id="latex-preview" style="font-size: 1.3em;"></div>
+        </div>
+        <div class="mode-hint">
+            Common: <code>\frac{a}{b}</code> · <code>\sqrt{x}</code> · <code>x^{2}</code> · <code>x_{n}</code> · <code>\omega</code> · <code>\pi</code> · <code>\int_0^T</code> · <code>\sum_{n=1}^N</code> · <code>\vec{F}</code> · <code>\begin{pmatrix} a & b \\ c & d \end{pmatrix}</code>
+        </div>
+    </div>
+
+    <!-- Handwriting Panel -->
+    <div id="panel-handwriting" class="panel">
+        <canvas id="hw-canvas" class="hw-canvas" width="680" height="250"></canvas>
+        <div class="hw-controls">
+            <button class="hw-btn" onclick="clearCanvas()">🗑️ Clear</button>
+            <button class="hw-btn" onclick="undoStroke()">↩️ Undo</button>
+            <input type="range" id="hw-pen-size" min="1" max="8" value="3" style="width: 80px;" title="Pen size">
+            <input type="color" id="hw-pen-color" value="#60a5fa" title="Pen color" style="width: 30px; height: 28px; border: none; cursor: pointer;">
+            <span style="flex:1;"></span>
+            <button class="hw-btn primary" onclick="recognizeHandwriting()">🤖 Recognize Math</button>
+        </div>
+        <div id="hw-result" style="margin-top: 10px;"></div>
+        <div class="mode-hint">Write your equation with mouse or stylus. Click "Recognize Math" to convert to notation (requires Gemini API).</div>
+    </div>
+
+    <!-- Hidden output that Streamlit reads -->
+    <textarea id="math-output"></textarea>
+
+    <script>
+        // ─── State ───
+        let currentTab = 'visual';
+        let mqField = null;
+        let hwCtx = null;
+        let hwStrokes = [];
+        let currentStroke = [];
+        let isDrawing = false;
+
+        // ─── Tab Switching ───
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('panel-' + tab).classList.add('active');
+        }
+
+        // ─── MathQuill Visual Editor ───
+        $(document).ready(function() {
+            var MQ = MathQuill.getInterface(2);
+            mqField = MQ.MathField(document.getElementById('mathquill-editor'), {
+                spaceBehavesLikeTab: true,
+                handlers: {
+                    edit: function() {
+                        updateOutput();
+                    }
+                }
+            });
+        });
+
+        function insertMQ(latex, moveToCursor) {
+            if (!mqField) return;
+            mqField.cmd(latex);
+            mqField.focus();
+            updateOutput();
+        }
+
+        function insertMatrix(rows, cols) {
+            if (!mqField) return;
+            let latex = '\\begin{pmatrix} ';
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    latex += ' ';
+                    if (c < cols - 1) latex += ' & ';
+                }
+                if (r < rows - 1) latex += ' \\\\ ';
+            }
+            latex += ' \\end{pmatrix}';
+            mqField.write(latex);
+            mqField.focus();
+            updateOutput();
+        }
+
+        // ─── LaTeX Input with Preview ───
+        function updateLatexPreview() {
+            const input = document.getElementById('latex-input').value;
+            const preview = document.getElementById('latex-preview');
+            try {
+                katex.render(input, preview, {
+                    throwOnError: false,
+                    displayMode: true
+                });
+            } catch(e) {
+                preview.innerHTML = '<span style="color:#f87171; font-size: 13px;">Invalid LaTeX — keep typing...</span>';
+            }
+            updateOutput();
+        }
+
+        // ─── Handwriting Canvas ───
+        function initCanvas() {
+            const canvas = document.getElementById('hw-canvas');
+            hwCtx = canvas.getContext('2d');
+            hwCtx.lineCap = 'round';
+            hwCtx.lineJoin = 'round';
+
+            canvas.addEventListener('mousedown', startStroke);
+            canvas.addEventListener('mousemove', continueStroke);
+            canvas.addEventListener('mouseup', endStroke);
+            canvas.addEventListener('mouseleave', endStroke);
+
+            // Touch support
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startStroke(getTouchPos(e)); });
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); continueStroke(getTouchPos(e)); });
+            canvas.addEventListener('touchend', (e) => { e.preventDefault(); endStroke(); });
+        }
+
+        function getTouchPos(e) {
+            const rect = e.target.getBoundingClientRect();
+            const touch = e.touches[0];
+            return { offsetX: touch.clientX - rect.left, offsetY: touch.clientY - rect.top };
+        }
+
+        function startStroke(e) {
+            isDrawing = true;
+            currentStroke = [{ x: e.offsetX, y: e.offsetY }];
+            hwCtx.beginPath();
+            hwCtx.strokeStyle = document.getElementById('hw-pen-color').value;
+            hwCtx.lineWidth = document.getElementById('hw-pen-size').value;
+            hwCtx.moveTo(e.offsetX, e.offsetY);
+        }
+
+        function continueStroke(e) {
+            if (!isDrawing) return;
+            currentStroke.push({ x: e.offsetX, y: e.offsetY });
+            hwCtx.lineTo(e.offsetX, e.offsetY);
+            hwCtx.stroke();
+        }
+
+        function endStroke() {
+            if (!isDrawing) return;
+            isDrawing = false;
+            if (currentStroke.length > 0) {
+                hwStrokes.push({
+                    points: [...currentStroke],
+                    color: document.getElementById('hw-pen-color').value,
+                    width: document.getElementById('hw-pen-size').value
+                });
+            }
+            currentStroke = [];
+        }
+
+        function clearCanvas() {
+            const canvas = document.getElementById('hw-canvas');
+            hwCtx.clearRect(0, 0, canvas.width, canvas.height);
+            hwStrokes = [];
+            document.getElementById('hw-result').innerHTML = '';
+        }
+
+        function undoStroke() {
+            hwStrokes.pop();
+            redrawCanvas();
+        }
+
+        function redrawCanvas() {
+            const canvas = document.getElementById('hw-canvas');
+            hwCtx.clearRect(0, 0, canvas.width, canvas.height);
+            hwStrokes.forEach(stroke => {
+                hwCtx.beginPath();
+                hwCtx.strokeStyle = stroke.color;
+                hwCtx.lineWidth = stroke.width;
+                hwCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
+                stroke.points.forEach(p => hwCtx.lineTo(p.x, p.y));
+                hwCtx.stroke();
+            });
+        }
+
+        function recognizeHandwriting() {
+            const canvas = document.getElementById('hw-canvas');
+            const dataUrl = canvas.toDataURL('image/png');
+            const resultDiv = document.getElementById('hw-result');
+            resultDiv.innerHTML = '<span style="color: #888; font-size: 13px;">🤖 Sending to AI for recognition...</span>';
+
+            // Store the image data for Streamlit to read
+            const output = document.getElementById('math-output');
+            output.value = 'HANDWRITING:' + dataUrl;
+            output.dispatchEvent(new Event('input'));
+
+            // Notify Streamlit
+            if (window.parent) {
+                window.parent.postMessage({
+                    type: 'streamlit:setComponentValue',
+                    value: 'HANDWRITING:' + dataUrl
+                }, '*');
+            }
+        }
+
+        // ─── Output sync ───
+        function updateOutput() {
+            const output = document.getElementById('math-output');
+            let latex = '';
+
+            if (currentTab === 'visual' && mqField) {
+                latex = mqField.latex();
+            } else if (currentTab === 'latex') {
+                latex = document.getElementById('latex-input').value;
+            }
+
+            output.value = latex;
+
+            // Notify Streamlit of change
+            if (window.parent) {
+                window.parent.postMessage({
+                    type: 'streamlit:setComponentValue',
+                    value: latex
+                }, '*');
+            }
+        }
+
+        // Initialize canvas when panel loads
+        setTimeout(initCanvas, 100);
+
+        // Listen for Streamlit messages
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'streamlit:render') {
+                // Re-init if needed
+                if (!hwCtx) initCanvas();
+            }
+        });
+    </script>
+</body>
+</html>

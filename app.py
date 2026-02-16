@@ -358,13 +358,118 @@ gemini_key = _get_gemini_key()
 
 # ─── Math Editor Helpers ───
 def _get_math_editor_html(mode="visual"):
-    """Load the math editor HTML component."""
-    editor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "math_editor.html")
-    try:
-        with open(editor_path, "r") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "<p style='color: #f87171;'>Math editor component not found.</p>"
+    """Return the math editor HTML inline — no file dependency."""
+    return """
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: transparent; color: #e8e6f0; }
+        .symbol-toolbar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+        .symbol-group { display: flex; gap: 3px; padding-right: 8px; margin-right: 4px; border-right: 1px solid rgba(255,255,255,0.06); }
+        .symbol-group:last-child { border-right: none; }
+        .sym-btn {
+            width: 36px; height: 34px; display: flex; align-items: center; justify-content: center;
+            border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; background: rgba(255,255,255,0.03);
+            color: #bbb; cursor: pointer; font-size: 14px; transition: all 0.15s;
+        }
+        .sym-btn:hover { background: rgba(124,58,237,0.15); border-color: rgba(124,58,237,0.3); color: #c4b5fd; }
+        .mq-editable-field {
+            background: rgba(255,255,255,0.05) !important; border: 1px solid rgba(255,255,255,0.12) !important;
+            border-radius: 10px !important; padding: 14px 16px !important; color: #e8e6f0 !important;
+            font-size: 18px !important; min-height: 52px !important;
+        }
+        .mq-editable-field .mq-cursor { border-color: #c4b5fd !important; }
+        .mq-editable-field.mq-focused { border-color: rgba(124,58,237,0.5) !important; box-shadow: 0 0 0 2px rgba(124,58,237,0.15) !important; }
+        .hint { font-size: 11px; color: #666; margin-top: 6px; }
+    </style>
+    <div class="symbol-toolbar">
+        <div class="symbol-group">
+            <div class="sym-btn" onclick="mqField.cmd('\\\\frac'); mqField.focus();" title="Fraction">⁄</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\sqrt'); mqField.focus();" title="Square root">√</div>
+            <div class="sym-btn" onclick="mqField.cmd('^'); mqField.focus();" title="Exponent">x²</div>
+            <div class="sym-btn" onclick="mqField.cmd('_'); mqField.focus();" title="Subscript">x₁</div>
+        </div>
+        <div class="symbol-group">
+            <div class="sym-btn" onclick="mqField.cmd('\\\\sin'); mqField.focus();">sin</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\cos'); mqField.focus();">cos</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\tan'); mqField.focus();">tan</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\ln'); mqField.focus();">ln</div>
+        </div>
+        <div class="symbol-group">
+            <div class="sym-btn" onclick="mqField.cmd('\\\\pi'); mqField.focus();">π</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\omega'); mqField.focus();">ω</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\lambda'); mqField.focus();">λ</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\mu'); mqField.focus();">μ</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\Delta'); mqField.focus();">Δ</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\phi'); mqField.focus();">φ</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\theta'); mqField.focus();">θ</div>
+        </div>
+        <div class="symbol-group">
+            <div class="sym-btn" onclick="mqField.cmd('\\\\sum'); mqField.focus();">∑</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\int'); mqField.focus();">∫</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\partial'); mqField.focus();">∂</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\infty'); mqField.focus();">∞</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\pm'); mqField.focus();">±</div>
+        </div>
+        <div class="symbol-group">
+            <div class="sym-btn" onclick="mqField.cmd('\\\\vec'); mqField.focus();" title="Vector">v⃗</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\hat'); mqField.focus();" title="Hat">â</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\dot'); mqField.focus();" title="Dot">ẋ</div>
+            <div class="sym-btn" onclick="mqField.cmd('\\\\ddot'); mqField.focus();" title="Double dot">ẍ</div>
+        </div>
+    </div>
+    <div id="mathquill-editor"></div>
+    <div class="hint">Click symbols or type directly. Use Tab to move between fields. Shift+arrow to select.</div>
+    <script>
+        $(document).ready(function() {
+            var MQ = MathQuill.getInterface(2);
+            window.mqField = MQ.MathField(document.getElementById('mathquill-editor'), {
+                spaceBehavesLikeTab: true,
+                handlers: { edit: function() {} }
+            });
+        });
+    </script>
+    """
+
+
+def render_latex_question(text):
+    """Render a question string that may contain LaTeX (between $ delimiters) using KaTeX."""
+    import re
+    import html as html_lib
+
+    # Split on $...$ for inline math
+    parts = re.split(r'(\$[^$]+\$)', text)
+    html_parts = []
+    latex_items = []
+
+    for part in parts:
+        if part.startswith('$') and part.endswith('$'):
+            latex = part[1:-1]
+            idx = len(latex_items)
+            latex_items.append(latex)
+            html_parts.append(f'<span id="kx{idx}"></span>')
+        else:
+            html_parts.append(html_lib.escape(part))
+
+    content_html = ''.join(html_parts)
+
+    # Build JS render calls
+    render_calls = ""
+    for i, latex in enumerate(latex_items):
+        # Escape backslashes and quotes for JS string
+        safe_latex = latex.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+        render_calls += f"try {{ katex.render('{safe_latex}', document.getElementById('kx{i}'), {{ throwOnError: false }}); }} catch(e) {{}}\n"
+
+    return f"""<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<div style="font-size: 17px; line-height: 1.7; color: #ddd; font-family: 'Crimson Text', Georgia, serif; padding: 4px 0;">{content_html}</div>
+<script>
+{render_calls}
+</script>"""
 
 
 def _recognize_math_handwriting(pil_image, api_key):
@@ -539,21 +644,50 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
     if q["type"] in ("drawing", "math_input") and not gemini_key:
         st.error("🔑 **This question requires AI evaluation.** Open the sidebar (click `>` top-left) and enter your Gemini API key.")
 
-    st.markdown(f"**{q['question']}**")
+    # Render question with LaTeX
+    st.components.v1.html(render_latex_question(q["question"]), height=80, scrolling=False)
     st.markdown("")
 
     # ─── Answer input ───
     if not st.session_state.show_explanation:
         if q["type"] == "multiple_choice":
-            options_with_letters = [
-                f"{chr(65+i)}.  {opt}" for i, opt in enumerate(q["options"])
-            ]
+            # Render options with LaTeX
+            options_html = ""
+            for i, opt in enumerate(q["options"]):
+                letter = chr(65 + i)
+                options_html += f'<div style="margin: 6px 0; font-size: 15px; color: #ccc;"><strong style="color: #c4b5fd;">{letter}.</strong> <span class="katex-inline" data-latex-opt="{i}">{opt}</span></div>'
+
+            latex_options_html = f"""<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<div style="font-family: 'Crimson Text', Georgia, serif; padding: 4px 0;">{options_html}</div>
+<script>
+document.querySelectorAll('.katex-inline').forEach(function(el) {{
+    var text = el.textContent;
+    var parts = text.split(/\\$([^$]+)\\$/g);
+    var html = '';
+    for (var i = 0; i < parts.length; i++) {{
+        if (i % 2 === 1) {{
+            try {{
+                var span = document.createElement('span');
+                katex.render(parts[i], span, {{ throwOnError: false }});
+                html += span.outerHTML;
+            }} catch(e) {{ html += parts[i]; }}
+        }} else {{
+            html += parts[i];
+        }}
+    }}
+    el.innerHTML = html;
+}});
+</script>"""
+            st.components.v1.html(latex_options_html, height=len(q["options"]) * 42 + 10, scrolling=False)
+
+            # Simple letter selector
             answer = st.radio(
-                "Select your answer:",
+                "Your answer:",
                 options=range(len(q["options"])),
-                format_func=lambda i: options_with_letters[i],
+                format_func=lambda i: f"{chr(65+i)}",
                 key=f"mc_{q['id']}",
-                label_visibility="collapsed",
+                horizontal=True,
             )
 
         elif q["type"] == "numerical":
@@ -920,13 +1054,14 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
                     unsafe_allow_html=True,
                 )
 
+        # Render explanation with LaTeX
         st.markdown(
             f"""<div class="{css_class}" style="margin-top: 0.5rem;">
-            <strong>📖 Full Explanation:</strong><br><br>
-            {q['explanation']}
+            <strong>📖 Full Explanation:</strong>
             </div>""",
             unsafe_allow_html=True,
         )
+        st.components.v1.html(render_latex_question(q['explanation']), height=120, scrolling=True)
 
         btn_cols = st.columns([3, 1])
         with btn_cols[0]:
