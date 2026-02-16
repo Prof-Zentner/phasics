@@ -19,6 +19,13 @@ from engine import (
     get_ability_estimate,
     get_topic_breakdown,
     check_answer,
+    TOPIC_ORDER,
+    get_subtopic_stats,
+    check_mastery,
+    just_mastered,
+    get_recommended_subtopic,
+    get_next_subtopic_in_order,
+    get_mastered_subtopics,
 )
 from tutor import get_tutor_response, evaluate_drawing, evaluate_math_input
 
@@ -237,6 +244,8 @@ defaults = {
     "question_start_time": None,
     "tutor_messages": [],
     "tutor_context": None,
+    "focus_subtopic": None,
+    "mastery_popup": None,
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -252,21 +261,43 @@ LEVEL_LABELS = {
 
 
 # ─── Helper functions ───
-def start_quiz():
-    q = get_next_question(st.session_state.history, QUESTION_BANK, 1)
+def start_quiz(subtopic=None):
+    if subtopic:
+        st.session_state.focus_subtopic = subtopic
+    elif not st.session_state.focus_subtopic:
+        # Pick the recommended subtopic
+        rec = get_recommended_subtopic(st.session_state.history, QUESTION_BANK)
+        st.session_state.focus_subtopic = rec["subtopic"] if rec else None
+
+    q = get_next_question(
+        st.session_state.history, QUESTION_BANK, 1,
+        focus_subtopic=st.session_state.focus_subtopic,
+    )
     st.session_state.current_question = q
     st.session_state.question_start_time = time.time()
     st.session_state.show_explanation = False
     st.session_state.is_correct = None
     st.session_state.current_level = 1
+    st.session_state.mastery_popup = None
     st.session_state.screen = "quiz"
 
 
 def next_question():
+    # Check if current subtopic was just mastered
+    focus = st.session_state.focus_subtopic
+    if focus and just_mastered(focus, st.session_state.history, QUESTION_BANK):
+        st.session_state.mastery_popup = focus
+        # Auto-suggest next topic
+        nxt = get_recommended_subtopic(st.session_state.history, QUESTION_BANK, focus)
+        st.session_state._suggested_next = nxt
+    else:
+        st.session_state.mastery_popup = None
+
     q = get_next_question(
         st.session_state.history,
         QUESTION_BANK,
         st.session_state.current_level,
+        focus_subtopic=st.session_state.focus_subtopic,
     )
     if q is None:
         st.session_state.screen = "dashboard"
@@ -275,6 +306,23 @@ def next_question():
     st.session_state.show_explanation = False
     st.session_state.is_correct = None
     st.session_state.question_start_time = time.time()
+
+
+def switch_subtopic(subtopic):
+    st.session_state.focus_subtopic = subtopic
+    st.session_state.mastery_popup = None
+    q = get_next_question(
+        st.session_state.history, QUESTION_BANK,
+        st.session_state.current_level,
+        focus_subtopic=subtopic,
+    )
+    if q:
+        st.session_state.current_question = q
+        st.session_state.show_explanation = False
+        st.session_state.is_correct = None
+        st.session_state.question_start_time = time.time()
+    else:
+        st.session_state.screen = "dashboard"
 
 
 def stop_quiz():
@@ -543,23 +591,27 @@ st.markdown(
 )
 
 # Navigation (show after welcome)
-if st.session_state.screen != "welcome":
-    cols = st.columns([1, 1, 1, 2])
-    with cols[0]:
-        if st.button("📝 Quiz", use_container_width=True):
-            if st.session_state.current_question:
-                st.session_state.screen = "quiz"
-            else:
-                start_quiz()
-            st.rerun()
-    with cols[1]:
-        if st.button("📊 Progress", use_container_width=True):
-            st.session_state.screen = "dashboard"
-            st.rerun()
-    with cols[2]:
-        if st.button("🤖 Tutor", use_container_width=True):
-            open_tutor()
-            st.rerun()
+# Navigation bar (always visible)
+nav_cols = st.columns([1, 1, 1, 1])
+with nav_cols[0]:
+    if st.button("📝 Quiz", use_container_width=True):
+        if st.session_state.current_question:
+            st.session_state.screen = "quiz"
+        else:
+            start_quiz()
+        st.rerun()
+with nav_cols[1]:
+    if st.button("📚 Topics", use_container_width=True, type="primary" if st.session_state.screen == "welcome" else "secondary"):
+        st.session_state.screen = "welcome"
+        st.rerun()
+with nav_cols[2]:
+    if st.button("📊 Progress", use_container_width=True):
+        st.session_state.screen = "dashboard"
+        st.rerun()
+with nav_cols[3]:
+    if st.button("🤖 Tutor", use_container_width=True):
+        open_tutor()
+        st.rerun()
 
 st.markdown("---")
 
@@ -577,10 +629,6 @@ if st.session_state.screen == "welcome":
         )
         st.markdown(
             "<p style='text-align:center; color: #aaa; font-size: 1.05rem; line-height: 1.6;'>Adaptive learning that meets you where you are.</p>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<p style='text-align:center; color: #777; font-size: 0.85rem; line-height: 1.6; max-width: 450px; margin: 0 auto;'>Questions adapt in real time — getting harder as you improve and easier when you need more practice. Always working at your edge.</p>",
             unsafe_allow_html=True,
         )
 
@@ -607,14 +655,69 @@ if st.session_state.screen == "welcome":
         unsafe_allow_html=True,
     )
 
+    # ── Topic Map ──
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
-        "<p style='text-align:center; color: #666; font-size: 0.8rem; margin-bottom: 1rem;'><strong style='color:#888;'>Pilot Module:</strong> SHM & Standing Waves</p>",
+        "<p style='text-align:center; font-family: Inter, sans-serif; color: #888; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px;'>📚 Choose a Topic or Follow the Recommended Path</p>",
         unsafe_allow_html=True,
     )
 
+    stats = get_subtopic_stats(st.session_state.history, QUESTION_BANK)
+    rec = get_recommended_subtopic(st.session_state.history, QUESTION_BANK)
+    rec_sub = rec["subtopic"] if rec else None
+
+    # Render topic cards in a grid
+    for i in range(0, len(TOPIC_ORDER), 3):
+        cols = st.columns(3)
+        for j, col in enumerate(cols):
+            idx = i + j
+            if idx >= len(TOPIC_ORDER):
+                break
+            t = TOPIC_ORDER[idx]
+            sub = t["subtopic"]
+            s = stats.get(sub, {})
+            mastered = s.get("mastered", False)
+            attempted = s.get("total", 0)
+            correct = s.get("correct", 0)
+            is_rec = sub == rec_sub
+
+            # Visual status
+            if mastered:
+                icon = "✅"
+                border_color = "#4ade80"
+                bg = "rgba(74,222,128,0.06)"
+                status_text = f"Mastered ({correct}/{attempted})"
+            elif attempted > 0:
+                icon = "📖"
+                border_color = "#eab308"
+                bg = "rgba(234,179,8,0.06)"
+                status_text = f"In progress ({correct}/{attempted})"
+            else:
+                icon = "○"
+                border_color = "rgba(255,255,255,0.08)"
+                bg = "rgba(255,255,255,0.02)"
+                status_text = "Not started"
+
+            rec_badge = " ⭐" if is_rec else ""
+
+            with col:
+                st.markdown(
+                    f"""<div style="border: 1px solid {border_color}; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; background: {bg};">
+                    <div style="font-size: 13px; color: #ccc; font-weight: 600;">{icon} {t['label']}{rec_badge}</div>
+                    <div style="font-size: 11px; color: #888; margin-top: 4px;">{t['topic']} · {status_text}</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"Start" if not mastered else "Review", key=f"welcome_{sub}", use_container_width=True):
+                    start_quiz(subtopic=sub)
+                    st.rerun()
+
+    # Quick start button
+    st.markdown("<br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("Begin Assessment →", use_container_width=True, type="primary"):
+        rec_label = f"Begin → {rec['label']}" if rec else "Begin Assessment"
+        if st.button(rec_label, use_container_width=True, type="primary"):
             start_quiz()
             st.rerun()
 
@@ -628,15 +731,45 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
     level = st.session_state.current_level
     correct_count = sum(1 for h in history if h["correct"])
 
+    # ── Mastery popup ──
+    mastery_sub = st.session_state.get("mastery_popup")
+    if mastery_sub:
+        suggested = st.session_state.get("_suggested_next")
+        st.success(f"🎉 **You've mastered {mastery_sub}!** Great work.")
+        mcols = st.columns([1, 1, 1])
+        if suggested:
+            with mcols[0]:
+                if st.button(f"→ Next: {suggested['label']}", type="primary", use_container_width=True):
+                    switch_subtopic(suggested["subtopic"])
+                    st.rerun()
+            with mcols[1]:
+                if st.button("Keep practicing", use_container_width=True):
+                    st.session_state.mastery_popup = None
+                    st.rerun()
+            with mcols[2]:
+                if st.button("📚 Pick a topic", use_container_width=True):
+                    st.session_state.screen = "welcome"
+                    st.session_state.mastery_popup = None
+                    st.rerun()
+        else:
+            st.balloons()
+            st.markdown("**🏆 All topics mastered! You can review any topic or check your dashboard.**")
+            if st.button("📊 View Dashboard", type="primary"):
+                st.session_state.screen = "dashboard"
+                st.session_state.mastery_popup = None
+                st.rerun()
+
     # Status bar
-    status_cols = st.columns([3, 2, 1])
+    focus = st.session_state.focus_subtopic
+    focus_label = focus if focus else "Mixed"
+    status_cols = st.columns([2, 1, 1, 1])
     with status_cols[0]:
         q_num = len(history) + (0 if st.session_state.show_explanation else 1)
         level_label = LEVEL_LABELS.get(level, "?")
         st.markdown(
             f"""<span class="topic-tag">Q{q_num}</span> &nbsp;
             <span class="level-badge level-{level}">{level_label} (L{level})</span> &nbsp;
-            <span class="topic-tag">{q['topic']} → {q['subtopic']}</span>""",
+            <span class="topic-tag">📍 {focus_label}</span>""",
             unsafe_allow_html=True,
         )
     with status_cols[1]:
@@ -645,6 +778,14 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
             unsafe_allow_html=True,
         )
     with status_cols[2]:
+        if st.button("⏭ Skip Topic", type="secondary", key="skip_topic"):
+            nxt = get_next_subtopic_in_order(focus) if focus else get_recommended_subtopic(history, QUESTION_BANK)
+            if nxt:
+                switch_subtopic(nxt["subtopic"])
+            else:
+                st.session_state.screen = "welcome"
+            st.rerun()
+    with status_cols[3]:
         if st.button("■ Stop", type="secondary", key="stop_quiz"):
             stop_quiz()
             st.rerun()
@@ -673,10 +814,13 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
     if q["type"] in ("drawing", "math_input") and not gemini_key:
         st.error("🔑 **This question requires AI evaluation.** Open the sidebar (click `>` top-left) and enter your Gemini API key.")
 
-    # Render question with LaTeX (auto-resizing)
-    # Render question with LaTeX — estimate height based on text length
+    # Render question with LaTeX — estimate height generously for LaTeX content
     q_text = q["question"]
-    est_height = max(60, min(300, 40 + len(q_text) // 2))
+    import re as _re_height
+    latex_count = len(_re_height.findall(r'\$[^$]+\$', q_text))
+    # Base: 60px per ~80 chars, plus 25px per LaTeX expression, minimum 100px
+    est_lines = max(1, len(q_text) / 70)
+    est_height = int(max(100, est_lines * 55 + latex_count * 25 + 30))
     st.components.v1.html(render_latex_question(q_text), height=est_height, scrolling=False)
     st.markdown("")
 
@@ -885,10 +1029,13 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
             </div>""",
             unsafe_allow_html=True,
         )
-        expl_height = max(80, min(400, 40 + len(q['explanation']) // 2))
-        st.components.v1.html(render_latex_question(q['explanation'], min_height=40), height=expl_height, scrolling=False)
+        expl_text = q['explanation']
+        expl_latex = len(_re_height.findall(r'\$[^$]+\$', expl_text))
+        expl_lines = max(1, len(expl_text) / 70)
+        expl_height = int(max(100, expl_lines * 55 + expl_latex * 25 + 30))
+        st.components.v1.html(render_latex_question(expl_text, min_height=40), height=expl_height, scrolling=False)
 
-        btn_cols = st.columns([3, 1])
+        btn_cols = st.columns([2, 1, 1])
         with btn_cols[0]:
             if st.button("Next Question →", type="primary", use_container_width=True):
                 next_question()
@@ -904,6 +1051,34 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
                     }
                 )
                 st.rerun()
+        with btn_cols[2]:
+            nxt_topic = get_next_subtopic_in_order(st.session_state.focus_subtopic) if st.session_state.focus_subtopic else None
+            if nxt_topic:
+                if st.button(f"⏭ Skip to {nxt_topic['subtopic']}", use_container_width=True):
+                    switch_subtopic(nxt_topic["subtopic"])
+                    st.rerun()
+            else:
+                if st.button("📚 All Topics", use_container_width=True):
+                    st.session_state.screen = "welcome"
+                    st.rerun()
+
+        # Topic switcher expander
+        with st.expander("📚 Switch Topic", expanded=False):
+            stats = get_subtopic_stats(history, QUESTION_BANK)
+            topic_cols = st.columns(3)
+            for idx, t in enumerate(TOPIC_ORDER):
+                sub = t["subtopic"]
+                s = stats.get(sub, {})
+                mastered = s.get("mastered", False)
+                is_current = sub == st.session_state.focus_subtopic
+                icon = "✅" if mastered else ("📍" if is_current else "○")
+                with topic_cols[idx % 3]:
+                    label = f"{icon} {t['label']}"
+                    if is_current:
+                        label += " ← current"
+                    if st.button(label, key=f"switch_{sub}", use_container_width=True, disabled=is_current):
+                        switch_subtopic(sub)
+                        st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════
