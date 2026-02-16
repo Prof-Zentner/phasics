@@ -356,6 +356,47 @@ with st.sidebar:
 gemini_key = _get_gemini_key()
 
 
+# ─── Math Editor Helpers ───
+def _get_math_editor_html(mode="visual"):
+    """Load the math editor HTML component."""
+    editor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "math_editor.html")
+    try:
+        with open(editor_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "<p style='color: #f87171;'>Math editor component not found.</p>"
+
+
+def _recognize_math_handwriting(pil_image, api_key):
+    """Use Gemini Vision to recognize handwritten math and return LaTeX."""
+    import google.generativeai as genai
+    import base64
+    from io import BytesIO
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+
+        buffer = BytesIO()
+        pil_image.save(buffer, format="PNG")
+        img_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        response = model.generate_content([
+            {"mime_type": "image/png", "data": img_b64},
+            """This image contains a handwritten mathematical expression or equation.
+Convert it to LaTeX notation. Return ONLY the LaTeX string, nothing else.
+Do not include dollar signs or \\[ \\] delimiters.
+Examples of output format:
+- x(t) = A \\cos(\\omega t + \\phi)
+- \\frac{d^2 x}{dt^2} = -\\omega^2 x
+- E = \\frac{1}{2}kA^2
+- f_n = \\frac{n}{2L}\\sqrt{\\frac{T}{\\mu}}"""
+        ])
+        return response.text.strip().strip("$").strip("\\[").strip("\\]").strip()
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 # ─── Header ───
 st.markdown(
     """
@@ -593,23 +634,148 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
 
         elif q["type"] == "math_input":
             st.markdown(
-                """<p style='color: #888; font-size: 0.8rem; margin-bottom: 0.5rem;'>
-                ✍️ Type your mathematical expression below. Use standard notation:<br>
-                <code>√(x)</code> for square root · <code>x^2</code> for powers · <code>π</code> or <code>pi</code> for pi · <code>ω</code> or <code>omega</code> for omega<br>
-                <code>sin(x)</code>, <code>cos(x)</code> for trig · <code>Δx</code> or <code>delta_x</code> for delta
+                """<p style='color: #888; font-size: 0.8rem; margin-bottom: 0.3rem;'>
+                ✍️ Choose your preferred input method below.
                 </p>""",
                 unsafe_allow_html=True,
             )
 
-            math_answer = st.text_area(
-                "Your mathematical expression / derivation:",
-                key=f"math_{q['id']}",
-                height=120,
-                placeholder="e.g., x(t) = A cos(ωt + φ)  or  v(t) = -Aω sin(ωt + φ)",
+            math_mode = st.radio(
+                "Input method:",
+                ["🧮 Visual Editor", "📝 LaTeX", "✍️ Handwriting"],
+                horizontal=True,
+                key=f"math_mode_{q['id']}",
+                label_visibility="collapsed",
             )
 
+            if math_mode == "🧮 Visual Editor":
+                # Embed MathQuill visual editor via HTML component
+                editor_html = _get_math_editor_html("visual")
+                math_component_val = st.components.v1.html(editor_html, height=220, scrolling=False)
+
+                # Also provide a text fallback that syncs
+                st.markdown(
+                    "<p style='color:#666; font-size: 0.72rem; margin-top: 4px;'>If the visual editor doesn't load, type your answer below:</p>",
+                    unsafe_allow_html=True,
+                )
+                math_answer = st.text_input(
+                    "LaTeX output:",
+                    key=f"math_{q['id']}",
+                    placeholder=r"e.g., x(t) = A \cos(\omega t + \phi)",
+                )
+
+            elif math_mode == "📝 LaTeX":
+                # LaTeX input with live KaTeX preview
+                math_answer = st.text_area(
+                    "Type LaTeX:",
+                    key=f"math_{q['id']}",
+                    height=80,
+                    placeholder=r"e.g., x(t) = A \cos(\omega t + \phi)",
+                )
+
+                # Render preview
+                if math_answer:
+                    preview_html = f"""
+                    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+                    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+                    <div id="preview" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+                        border-radius: 10px; padding: 16px; text-align: center; min-height: 40px; color: #e8e6f0;">
+                        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #666; margin-bottom: 8px;">
+                            Live Preview
+                        </div>
+                        <div id="katex-render"></div>
+                    </div>
+                    <script>
+                        try {{
+                            katex.render("{math_answer.replace(chr(92), chr(92)+chr(92))}", document.getElementById("katex-render"), {{
+                                throwOnError: false,
+                                displayMode: true
+                            }});
+                        }} catch(e) {{
+                            document.getElementById("katex-render").innerHTML = '<span style="color:#f87171; font-size: 13px;">Keep typing...</span>';
+                        }}
+                    </script>
+                    """
+                    st.components.v1.html(preview_html, height=100)
+
+                st.markdown(
+                    """<p style='color:#666; font-size: 0.72rem; margin-top: 4px;'>
+                    Common: <code>\\frac{'{a}{b}'}</code> · <code>\\sqrt{'{x}'}</code> · <code>x^{'{2}'}</code> · <code>x_{'{n}'}</code> · <code>\\omega</code> · <code>\\pi</code> · <code>\\int_0^T</code> · <code>\\vec{'{F}'}</code> · <code>\\begin{'{pmatrix}'} a & b \\\\ c & d \\end{'{pmatrix}'}</code>
+                    </p>""",
+                    unsafe_allow_html=True,
+                )
+
+            elif math_mode == "✍️ Handwriting":
+                st.markdown(
+                    "<p style='color:#c4b5fd; font-size: 0.82rem;'>Write your equation below, then click <strong>Recognize</strong> to convert to LaTeX.</p>",
+                    unsafe_allow_html=True,
+                )
+
+                if HAS_CANVAS:
+                    hw_cols = st.columns([1, 1, 1])
+                    with hw_cols[0]:
+                        hw_color = st.color_picker("Pen color", "#60a5fa", key=f"hw_color_{q['id']}")
+                    with hw_cols[1]:
+                        hw_width = st.slider("Pen width", 1, 8, 3, key=f"hw_width_{q['id']}")
+
+                    hw_canvas = st_canvas(
+                        fill_color="rgba(0, 0, 0, 0)",
+                        stroke_width=hw_width,
+                        stroke_color=hw_color,
+                        background_color="#1a1a2e",
+                        height=200,
+                        width=680,
+                        drawing_mode="freedraw",
+                        key=f"hw_canvas_{q['id']}",
+                        display_toolbar=True,
+                    )
+
+                    if hw_canvas and hw_canvas.image_data is not None:
+                        st.session_state[f"hw_image_{q['id']}"] = hw_canvas.image_data
+
+                    rec_cols = st.columns([1, 3])
+                    with rec_cols[0]:
+                        if st.button("🤖 Recognize Math", key=f"recognize_{q['id']}"):
+                            hw_data = st.session_state.get(f"hw_image_{q['id']}", None)
+                            if hw_data is not None and gemini_key:
+                                import numpy as np
+                                from PIL import Image
+                                img = Image.fromarray(hw_data.astype("uint8"), "RGBA")
+                                with st.spinner("Recognizing handwriting..."):
+                                    recognized = _recognize_math_handwriting(img, gemini_key)
+                                st.session_state[f"hw_recognized_{q['id']}"] = recognized
+                            elif not gemini_key:
+                                st.error("Gemini API key required for handwriting recognition")
+
+                    recognized = st.session_state.get(f"hw_recognized_{q['id']}", "")
+                    if recognized:
+                        st.success(f"Recognized: `{recognized}`")
+                        # Render it
+                        rec_html = f"""
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+                        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+                        <div id="rec-render" style="text-align:center; padding: 10px;"></div>
+                        <script>
+                            try {{ katex.render("{recognized.replace(chr(92), chr(92)+chr(92))}", document.getElementById("rec-render"), {{ throwOnError: false, displayMode: true }}); }} catch(e) {{}}
+                        </script>
+                        """
+                        st.components.v1.html(rec_html, height=60)
+
+                    math_answer = st.text_input(
+                        "Edit recognized LaTeX (or type manually):",
+                        value=recognized,
+                        key=f"math_{q['id']}",
+                        placeholder="Recognized math will appear here...",
+                    )
+                else:
+                    st.warning("Canvas not available. Use Visual Editor or LaTeX mode instead.")
+                    math_answer = st.text_input(
+                        "Type your expression:",
+                        key=f"math_{q['id']}",
+                    )
+
             if q.get("expected_form"):
-                st.caption(f"💡 Expected form example: `{q['expected_form']}`")
+                st.caption(f"💡 Expected form: `{q['expected_form']}`")
 
         st.markdown("")
         if st.button("Submit Answer", type="primary", use_container_width=True):
