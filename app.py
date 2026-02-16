@@ -292,29 +292,46 @@ def open_tutor(context=None):
     st.session_state.screen = "tutor"
 
 
+# ─── Initialize Gemini Key in session state ───
+if "gemini_key_stored" not in st.session_state:
+    st.session_state["gemini_key_stored"] = ""
+
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
 
-    # Check for Streamlit secrets first, then fall back to manual input
-    default_key = ""
-    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-        default_key = st.secrets["GEMINI_API_KEY"]
+    # Check for Streamlit secrets first
+    secret_key = ""
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            secret_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
 
-    gemini_key_input = st.text_input(
-        "Gemini API Key",
-        value=default_key,
-        type="password",
-        help="Get a free key at ai.google.dev — or set GEMINI_API_KEY in Streamlit secrets",
-    )
-
-    # Store in session state so it's accessible everywhere
-    st.session_state["gemini_key"] = gemini_key_input
-
-    if gemini_key_input:
-        st.success("✓ API key set", icon="🔑")
+    # If we have a secret, use it directly
+    if secret_key:
+        st.session_state["gemini_key_stored"] = secret_key
+        st.success("✓ API key loaded from secrets", icon="🔑")
     else:
-        st.warning("Enter a Gemini API key for AI features (drawing eval, math review, tutor)")
+        # Manual input — use a callback to store the key
+        def _save_key():
+            val = st.session_state.get("_gemini_key_widget", "")
+            if val:
+                st.session_state["gemini_key_stored"] = val
+
+        st.text_input(
+            "Gemini API Key",
+            value=st.session_state["gemini_key_stored"],
+            type="password",
+            help="Get a free key at ai.google.dev",
+            key="_gemini_key_widget",
+            on_change=_save_key,
+        )
+
+        if st.session_state["gemini_key_stored"]:
+            st.success("✓ API key set", icon="🔑")
+        else:
+            st.warning("Enter a Gemini API key for AI features (drawing eval, math review, tutor)")
 
     st.markdown("---")
     st.markdown(
@@ -322,8 +339,8 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# Global reference to the key
-gemini_key = st.session_state.get("gemini_key", "")
+# Global reference to the key — persists across reruns
+gemini_key = st.session_state.get("gemini_key_stored", "")
 
 
 # ─── Header ───
@@ -538,6 +555,8 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
                 )
 
                 st.caption("💡 Use the toolbar above the canvas to undo or clear. Draw clearly — your sketch will be evaluated by AI.")
+                if not gemini_key:
+                    st.error("⚠️ **Gemini API key required** — open the sidebar (click `>` top-left) and enter your key to enable AI drawing evaluation.")
 
                 # Store canvas data in session state
                 if canvas_result and canvas_result.image_data is not None:
