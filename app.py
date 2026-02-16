@@ -436,12 +436,12 @@ def _get_math_editor_html(mode="visual"):
     """
 
 
-def render_latex_question(text):
-    """Render a question string that may contain LaTeX (between $ delimiters) using KaTeX."""
+def render_latex_question(text, min_height=40):
+    """Render a question string that may contain LaTeX (between $ delimiters) using KaTeX.
+    Uses auto-resizing iframe approach."""
     import re
     import html as html_lib
 
-    # Split on $...$ for inline math
     parts = re.split(r'(\$[^$]+\$)', text)
     html_parts = []
     latex_items = []
@@ -457,19 +457,48 @@ def render_latex_question(text):
 
     content_html = ''.join(html_parts)
 
-    # Build JS render calls
     render_calls = ""
     for i, latex in enumerate(latex_items):
-        # Escape backslashes and quotes for JS string
         safe_latex = latex.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
         render_calls += f"try {{ katex.render('{safe_latex}', document.getElementById('kx{i}'), {{ throwOnError: false }}); }} catch(e) {{}}\n"
 
-    return f"""<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    return f"""<!DOCTYPE html>
+<html><head>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<div style="font-size: 17px; line-height: 1.7; color: #ddd; font-family: 'Crimson Text', Georgia, serif; padding: 4px 0;">{content_html}</div>
+<style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    html, body {{ background: transparent; overflow: visible; height: auto; }}
+    #content {{
+        font-size: 17px; line-height: 1.75; color: #ddd;
+        font-family: 'Crimson Text', Georgia, serif;
+        padding: 4px 2px 8px;
+    }}
+    .katex {{ font-size: 1.05em !important; }}
+</style>
+</head><body>
+<div id="content">{content_html}</div>
 <script>
 {render_calls}
-</script>"""
+function resizeFrame() {{
+    try {{
+        var h = document.getElementById('content').getBoundingClientRect().height + 12;
+        h = Math.max(h, {min_height});
+        if (window.frameElement) {{
+            window.frameElement.style.height = h + 'px';
+        }}
+        // Also try postMessage for Streamlit
+        window.parent.postMessage({{ type: 'streamlit:setFrameHeight', height: h }}, '*');
+    }} catch(e) {{}}
+}}
+// Run multiple times to catch late KaTeX rendering
+setTimeout(resizeFrame, 100);
+setTimeout(resizeFrame, 300);
+setTimeout(resizeFrame, 600);
+setTimeout(resizeFrame, 1000);
+window.addEventListener('load', resizeFrame);
+</script>
+</body></html>"""
 
 
 def _recognize_math_handwriting(pil_image, api_key):
@@ -644,369 +673,166 @@ elif st.session_state.screen == "quiz" and st.session_state.current_question:
     if q["type"] in ("drawing", "math_input") and not gemini_key:
         st.error("🔑 **This question requires AI evaluation.** Open the sidebar (click `>` top-left) and enter your Gemini API key.")
 
-    # Render question with LaTeX
-    st.components.v1.html(render_latex_question(q["question"]), height=80, scrolling=False)
+    # Render question with LaTeX (auto-resizing)
+    # Render question with LaTeX — estimate height based on text length
+    q_text = q["question"]
+    est_height = max(60, min(300, 40 + len(q_text) // 2))
+    st.components.v1.html(render_latex_question(q_text), height=est_height, scrolling=False)
     st.markdown("")
 
     # ─── Answer input ───
     if not st.session_state.show_explanation:
+
+        # ── Primary answer input (type-specific) ──
         if q["type"] == "multiple_choice":
-            # Render options with LaTeX
-            options_html = ""
+            import re as _re
+            import html as _html_lib
+            options_rendered = ""
+            all_latex_calls = ""
             for i, opt in enumerate(q["options"]):
                 letter = chr(65 + i)
-                options_html += f'<div style="margin: 6px 0; font-size: 15px; color: #ccc;"><strong style="color: #c4b5fd;">{letter}.</strong> <span class="katex-inline" data-latex-opt="{i}">{opt}</span></div>'
-
-            latex_options_html = f"""<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<div style="font-family: 'Crimson Text', Georgia, serif; padding: 4px 0;">{options_html}</div>
-<script>
-document.querySelectorAll('.katex-inline').forEach(function(el) {{
-    var text = el.textContent;
-    var parts = text.split(/\\$([^$]+)\\$/g);
-    var html = '';
-    for (var i = 0; i < parts.length; i++) {{
-        if (i % 2 === 1) {{
-            try {{
-                var span = document.createElement('span');
-                katex.render(parts[i], span, {{ throwOnError: false }});
-                html += span.outerHTML;
-            }} catch(e) {{ html += parts[i]; }}
-        }} else {{
-            html += parts[i];
-        }}
-    }}
-    el.innerHTML = html;
-}});
-</script>"""
-            st.components.v1.html(latex_options_html, height=len(q["options"]) * 42 + 10, scrolling=False)
-
-            # Simple letter selector
-            answer = st.radio(
-                "Your answer:",
-                options=range(len(q["options"])),
-                format_func=lambda i: f"{chr(65+i)}",
-                key=f"mc_{q['id']}",
-                horizontal=True,
-            )
+                opt_parts = _re.split(r'(\$[^$]+\$)', opt)
+                opt_html = ""
+                latex_idx = 0
+                for part in opt_parts:
+                    if part.startswith('$') and part.endswith('$'):
+                        latex = part[1:-1]
+                        uid = f"opt{i}_{latex_idx}"
+                        safe = latex.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+                        all_latex_calls += f"try{{katex.render('{safe}',document.getElementById('{uid}'),{{throwOnError:false}});}}catch(e){{}}\n"
+                        opt_html += f'<span id="{uid}"></span>'
+                        latex_idx += 1
+                    else:
+                        opt_html += _html_lib.escape(part)
+                options_rendered += f'<div style="margin:8px 0;font-size:15px;line-height:1.6;color:#ccc;"><strong style="color:#c4b5fd;margin-right:6px;">{letter}.</strong>{opt_html}</div>'
+            opts_html = f"""<!DOCTYPE html><html><head><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script><style>*{{margin:0;padding:0;box-sizing:border-box;}}body{{background:transparent;overflow:hidden;}}#opts{{font-family:'Crimson Text',Georgia,serif;padding:2px;}}.katex{{font-size:1.0em!important;}}</style></head><body><div id="opts">{options_rendered}</div><script>{all_latex_calls}function r(){{window.frameElement.style.height=Math.max(document.getElementById('opts').scrollHeight+8,40)+'px';}}setTimeout(r,50);setTimeout(r,200);setTimeout(r,500);</script></body></html>"""
+            st.components.v1.html(opts_html, height=len(q["options"]) * 50 + 20, scrolling=False)
+            answer = st.radio("Your answer:", options=range(len(q["options"])), format_func=lambda i: f"{chr(65+i)}", key=f"mc_{q['id']}", horizontal=True)
 
         elif q["type"] == "numerical":
             ncols = st.columns([2, 1])
             with ncols[0]:
-                answer = st.number_input(
-                    "Your answer:",
-                    format="%.4f",
-                    key=f"num_{q['id']}",
-                    step=0.001,
-                )
+                answer = st.number_input("Your answer:", format="%.4f", key=f"num_{q['id']}", step=0.001)
             with ncols[1]:
-                st.markdown(
-                    f"<br><span style='color:#888; font-size: 1.1rem;'>{q.get('unit', '')}</span>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<br><span style='color:#888;font-size:1.1rem;'>{q.get('unit','')}</span>", unsafe_allow_html=True)
 
         elif q["type"] == "conceptual":
-            answer = st.text_area(
-                "Explain your reasoning:",
-                key=f"concept_{q['id']}",
-                height=150,
-                placeholder="Use key physics concepts and reasoning...",
-            )
-            st.caption(f"💡 Key concepts to address: {', '.join(q.get('rubric', []))}")
+            answer = st.text_area("Explain your reasoning:", key=f"concept_{q['id']}", height=150, placeholder="Use key physics concepts and reasoning...")
+            st.caption(f"💡 Key concepts: {', '.join(q.get('rubric', []))}")
 
         elif q["type"] == "drawing":
-            st.markdown(
-                f"<p style='color: #c4b5fd; font-size: 0.85rem; margin-bottom: 0.5rem;'>🎨 <strong>Drawing prompt:</strong> {q.get('drawing_prompt', q['question'])}</p>",
-                unsafe_allow_html=True,
-            )
-
-            if HAS_CANVAS:
-                # Drawing tools
-                tool_cols = st.columns([1, 1, 1, 1])
-                with tool_cols[0]:
-                    drawing_mode = st.selectbox(
-                        "Tool",
-                        ["freedraw", "line", "circle", "rect"],
-                        key=f"tool_{q['id']}",
-                        format_func=lambda x: {"freedraw": "✏️ Pen", "line": "📏 Line", "circle": "⭕ Circle", "rect": "⬜ Rectangle"}.get(x, x),
-                    )
-                with tool_cols[1]:
-                    stroke_color = st.color_picker("Color", "#60a5fa", key=f"color_{q['id']}")
-                with tool_cols[2]:
-                    stroke_width = st.slider("Width", 1, 8, 3, key=f"width_{q['id']}")
-                with tool_cols[3]:
-                    bg_color = "#1a1a2e"
-
-                canvas_result = st_canvas(
-                    fill_color="rgba(0, 0, 0, 0)",
-                    stroke_width=stroke_width,
-                    stroke_color=stroke_color,
-                    background_color=bg_color,
-                    height=350,
-                    width=700,
-                    drawing_mode=drawing_mode,
-                    key=f"canvas_{q['id']}",
-                    display_toolbar=True,
-                )
-
-                st.caption("💡 Use the toolbar above the canvas to undo or clear. Draw clearly — your sketch will be evaluated by AI.")
-                if not gemini_key:
-                    st.error("⚠️ **Gemini API key required** — open the sidebar (click `>` top-left) and enter your key to enable AI drawing evaluation.")
-
-                # Store canvas data in session state
-                if canvas_result and canvas_result.image_data is not None:
-                    st.session_state[f"drawing_{q['id']}"] = canvas_result.image_data
-            else:
-                st.warning("Drawing canvas not available. Install `streamlit-drawable-canvas` for drawing features.")
-                st.markdown("**Alternative:** Describe your drawing in words below:")
-                answer = st.text_area(
-                    "Describe your drawing:",
-                    key=f"draw_text_{q['id']}",
-                    height=150,
-                    placeholder="Describe what you would draw...",
-                )
+            st.markdown(f"<p style='color:#c4b5fd;font-size:0.85rem;'>🎨 <strong>Drawing prompt:</strong> {q.get('drawing_prompt', q['question'])}</p>", unsafe_allow_html=True)
 
         elif q["type"] == "math_input":
-            st.markdown(
-                """<p style='color: #888; font-size: 0.8rem; margin-bottom: 0.3rem;'>
-                ✍️ Choose your preferred input method below.
-                </p>""",
-                unsafe_allow_html=True,
-            )
-
-            math_mode = st.radio(
-                "Input method:",
-                ["🧮 Visual Editor", "📝 LaTeX", "✍️ Handwriting"],
-                horizontal=True,
-                key=f"math_mode_{q['id']}",
-                label_visibility="collapsed",
-            )
-
-            if math_mode == "🧮 Visual Editor":
-                # Embed MathQuill visual editor via HTML component
-                editor_html = _get_math_editor_html("visual")
-                math_component_val = st.components.v1.html(editor_html, height=220, scrolling=False)
-
-                # Also provide a text fallback that syncs
-                st.markdown(
-                    "<p style='color:#666; font-size: 0.72rem; margin-top: 4px;'>If the visual editor doesn't load, type your answer below:</p>",
-                    unsafe_allow_html=True,
-                )
-                math_answer = st.text_input(
-                    "LaTeX output:",
-                    key=f"math_{q['id']}",
-                    placeholder=r"e.g., x(t) = A \cos(\omega t + \phi)",
-                )
-
-            elif math_mode == "📝 LaTeX":
-                # LaTeX input with live KaTeX preview
-                math_answer = st.text_area(
-                    "Type LaTeX:",
-                    key=f"math_{q['id']}",
-                    height=80,
-                    placeholder=r"e.g., x(t) = A \cos(\omega t + \phi)",
-                )
-
-                # Render preview
-                if math_answer:
-                    preview_html = f"""
-                    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-                    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-                    <div id="preview" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
-                        border-radius: 10px; padding: 16px; text-align: center; min-height: 40px; color: #e8e6f0;">
-                        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #666; margin-bottom: 8px;">
-                            Live Preview
-                        </div>
-                        <div id="katex-render"></div>
-                    </div>
-                    <script>
-                        try {{
-                            katex.render("{math_answer.replace(chr(92), chr(92)+chr(92))}", document.getElementById("katex-render"), {{
-                                throwOnError: false,
-                                displayMode: true
-                            }});
-                        }} catch(e) {{
-                            document.getElementById("katex-render").innerHTML = '<span style="color:#f87171; font-size: 13px;">Keep typing...</span>';
-                        }}
-                    </script>
-                    """
-                    st.components.v1.html(preview_html, height=100)
-
-                st.markdown(
-                    """<p style='color:#666; font-size: 0.72rem; margin-top: 4px;'>
-                    Common: <code>\\frac{'{a}{b}'}</code> · <code>\\sqrt{'{x}'}</code> · <code>x^{'{2}'}</code> · <code>x_{'{n}'}</code> · <code>\\omega</code> · <code>\\pi</code> · <code>\\int_0^T</code> · <code>\\vec{'{F}'}</code> · <code>\\begin{'{pmatrix}'} a & b \\\\ c & d \\end{'{pmatrix}'}</code>
-                    </p>""",
-                    unsafe_allow_html=True,
-                )
-
-            elif math_mode == "✍️ Handwriting":
-                st.markdown(
-                    "<p style='color:#c4b5fd; font-size: 0.82rem;'>Write your equation below, then click <strong>Recognize</strong> to convert to LaTeX.</p>",
-                    unsafe_allow_html=True,
-                )
-
-                if HAS_CANVAS:
-                    hw_cols = st.columns([1, 1, 1])
-                    with hw_cols[0]:
-                        hw_color = st.color_picker("Pen color", "#60a5fa", key=f"hw_color_{q['id']}")
-                    with hw_cols[1]:
-                        hw_width = st.slider("Pen width", 1, 8, 3, key=f"hw_width_{q['id']}")
-
-                    hw_canvas = st_canvas(
-                        fill_color="rgba(0, 0, 0, 0)",
-                        stroke_width=hw_width,
-                        stroke_color=hw_color,
-                        background_color="#1a1a2e",
-                        height=200,
-                        width=680,
-                        drawing_mode="freedraw",
-                        key=f"hw_canvas_{q['id']}",
-                        display_toolbar=True,
-                    )
-
-                    if hw_canvas and hw_canvas.image_data is not None:
-                        st.session_state[f"hw_image_{q['id']}"] = hw_canvas.image_data
-
-                    rec_cols = st.columns([1, 3])
-                    with rec_cols[0]:
-                        if st.button("🤖 Recognize Math", key=f"recognize_{q['id']}"):
-                            hw_data = st.session_state.get(f"hw_image_{q['id']}", None)
-                            if hw_data is not None and gemini_key:
-                                import numpy as np
-                                from PIL import Image
-                                img = Image.fromarray(hw_data.astype("uint8"), "RGBA")
-                                with st.spinner("Recognizing handwriting..."):
-                                    recognized = _recognize_math_handwriting(img, gemini_key)
-                                st.session_state[f"hw_recognized_{q['id']}"] = recognized
-                            elif not gemini_key:
-                                st.error("Gemini API key required for handwriting recognition")
-
-                    recognized = st.session_state.get(f"hw_recognized_{q['id']}", "")
-                    if recognized:
-                        st.success(f"Recognized: `{recognized}`")
-                        # Render it
-                        rec_html = f"""
-                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-                        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-                        <div id="rec-render" style="text-align:center; padding: 10px;"></div>
-                        <script>
-                            try {{ katex.render("{recognized.replace(chr(92), chr(92)+chr(92))}", document.getElementById("rec-render"), {{ throwOnError: false, displayMode: true }}); }} catch(e) {{}}
-                        </script>
-                        """
-                        st.components.v1.html(rec_html, height=60)
-
-                    math_answer = st.text_input(
-                        "Edit recognized LaTeX (or type manually):",
-                        value=recognized,
-                        key=f"math_{q['id']}",
-                        placeholder="Recognized math will appear here...",
-                    )
-                else:
-                    st.warning("Canvas not available. Use Visual Editor or LaTeX mode instead.")
-                    math_answer = st.text_input(
-                        "Type your expression:",
-                        key=f"math_{q['id']}",
-                    )
-
             if q.get("expected_form"):
                 st.caption(f"💡 Expected form: `{q['expected_form']}`")
 
+        # ── Universal Workspace (ALL question types) ──
+        st.markdown("---")
+        st.markdown("<p style='color:#888;font-size:0.78rem;font-family:Inter,sans-serif;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;'>✏️ Workspace — show your work</p>", unsafe_allow_html=True)
+
+        workspace_mode = st.radio("Input method:", ["🧮 Visual Editor", "📝 LaTeX", "✍️ Drawing / Handwriting"], horizontal=True, key=f"ws_mode_{q['id']}", label_visibility="collapsed")
+
+        if workspace_mode == "🧮 Visual Editor":
+            st.components.v1.html(_get_math_editor_html(), height=220, scrolling=False)
+            st.markdown("<p style='color:#666;font-size:0.72rem;margin-top:4px;'>Type below if visual editor doesn't load:</p>", unsafe_allow_html=True)
+            ws_text = st.text_input("LaTeX from editor:", key=f"ws_latex_{q['id']}", placeholder=r"e.g., x(t) = A \cos(\omega t + \phi)")
+
+        elif workspace_mode == "📝 LaTeX":
+            ws_text = st.text_area("Type LaTeX:", key=f"ws_latex_{q['id']}", height=80, placeholder=r"e.g., \frac{d^2x}{dt^2} = -\omega^2 x")
+            if ws_text:
+                safe_latex = ws_text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+                preview_html = f"""<!DOCTYPE html><html><head><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script><style>*{{margin:0;padding:0;}}body{{background:transparent;}}</style></head><body><div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px;text-align:center;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#666;margin-bottom:8px;">Live Preview</div><div id="pv"></div></div><script>try{{katex.render('{safe_latex}',document.getElementById('pv'),{{throwOnError:false,displayMode:true}});}}catch(e){{document.getElementById('pv').innerHTML='<span style=\"color:#f87171;font-size:13px\">Keep typing...</span>';}}</script></body></html>"""
+                st.components.v1.html(preview_html, height=90)
+            st.markdown("<p style='color:#666;font-size:0.72rem;'>Common: <code>\\frac{{a}}{{b}}</code> · <code>\\sqrt{{x}}</code> · <code>x^{{2}}</code> · <code>\\omega</code> · <code>\\pi</code> · <code>\\int_0^T</code> · <code>\\vec{{F}}</code></p>", unsafe_allow_html=True)
+
+        elif workspace_mode == "✍️ Drawing / Handwriting":
+            if HAS_CANVAS:
+                dc = st.columns([1, 1, 1, 1])
+                with dc[0]:
+                    ws_draw_mode = st.selectbox("Tool", ["freedraw", "line", "circle", "rect"], key=f"ws_tool_{q['id']}", format_func=lambda x: {"freedraw": "✏️ Pen", "line": "📏 Line", "circle": "⭕ Circle", "rect": "⬜ Rect"}.get(x, x))
+                with dc[1]:
+                    ws_color = st.color_picker("Color", "#60a5fa", key=f"ws_color_{q['id']}")
+                with dc[2]:
+                    ws_width = st.slider("Width", 1, 8, 3, key=f"ws_width_{q['id']}")
+                ws_canvas = st_canvas(fill_color="rgba(0,0,0,0)", stroke_width=ws_width, stroke_color=ws_color, background_color="#1a1a2e", height=300, width=680, drawing_mode=ws_draw_mode, key=f"ws_canvas_{q['id']}", display_toolbar=True)
+                if ws_canvas and ws_canvas.image_data is not None:
+                    st.session_state[f"drawing_{q['id']}"] = ws_canvas.image_data
+                if st.button("🤖 Recognize Math from Drawing", key=f"ws_recognize_{q['id']}"):
+                    hw_data = st.session_state.get(f"drawing_{q['id']}", None)
+                    if hw_data is not None and gemini_key:
+                        import numpy as np
+                        from PIL import Image
+                        img = Image.fromarray(hw_data.astype("uint8"), "RGBA")
+                        with st.spinner("Recognizing handwriting..."):
+                            recognized = _recognize_math_handwriting(img, gemini_key)
+                        st.session_state[f"ws_recognized_{q['id']}"] = recognized
+                    elif not gemini_key:
+                        st.error("Gemini API key required for handwriting recognition")
+                recognized = st.session_state.get(f"ws_recognized_{q['id']}", "")
+                if recognized:
+                    st.success(f"Recognized: `{recognized}`")
+                if not gemini_key:
+                    st.caption("⚠️ Add Gemini API key in sidebar for AI features")
+            else:
+                st.warning("Drawing canvas not available. Use Visual Editor or LaTeX.")
+
         st.markdown("")
         if st.button("Submit Answer", type="primary", use_container_width=True):
-            # Get the answer based on type
+            ai_feedback = None
             if q["type"] == "multiple_choice":
                 user_answer = st.session_state.get(f"mc_{q['id']}", None)
                 correct = check_answer(q, user_answer)
-                ai_feedback = None
-
             elif q["type"] == "numerical":
                 user_answer = st.session_state.get(f"num_{q['id']}", None)
                 correct = check_answer(q, user_answer)
-                ai_feedback = None
-
             elif q["type"] == "conceptual":
                 user_answer = st.session_state.get(f"concept_{q['id']}", "")
                 correct = check_answer(q, user_answer)
-                ai_feedback = None
-
             elif q["type"] == "drawing":
                 drawing_data = st.session_state.get(f"drawing_{q['id']}", None)
-                ai_feedback = None
                 if drawing_data is not None and HAS_CANVAS:
                     import numpy as np
                     from PIL import Image
-                    # Check if the canvas actually has drawing content (not just blank)
                     img_array = drawing_data.astype("uint8")
-                    # Check alpha channel — blank canvas has uniform alpha
                     has_content = np.any(img_array[:, :, 3] > 0) if img_array.shape[-1] == 4 else np.any(img_array > 0)
-
                     if not has_content:
                         correct = False
-                        ai_feedback = "It looks like the canvas is blank. Please draw your answer before submitting."
+                        ai_feedback = "Canvas appears blank."
                     elif not gemini_key:
                         correct = False
-                        ai_feedback = "⚠️ Please enter your Gemini API key in the **sidebar** (click the `>` arrow in the top-left) to enable AI drawing evaluation."
+                        ai_feedback = "⚠️ Gemini API key required."
                     else:
                         img = Image.fromarray(img_array, "RGBA")
-                        with st.spinner("🤖 AI is evaluating your drawing..."):
+                        with st.spinner("🤖 AI evaluating your drawing..."):
                             result = evaluate_drawing(img, q, gemini_key)
                         correct = result["correct"]
                         ai_feedback = result["feedback"]
                         st.session_state[f"drawing_score_{q['id']}"] = result["score"]
                 else:
-                    # Fallback to text description
-                    user_answer = st.session_state.get(f"draw_text_{q['id']}", "")
-                    if user_answer and gemini_key:
-                        # Evaluate text description via math evaluator as fallback
-                        with st.spinner("🤖 AI is evaluating your description..."):
-                            result = evaluate_math_input(
-                                user_answer,
-                                {
-                                    "question": q["question"],
-                                    "expected_form": q.get("explanation", ""),
-                                    "eval_criteria": q.get("eval_criteria", []),
-                                },
-                                gemini_key,
-                            )
-                        correct = result["correct"]
-                        ai_feedback = result["feedback"]
-                    else:
-                        correct = False
-                        ai_feedback = "Drawing canvas was not available and no description was provided."
-
+                    correct = False
+                    ai_feedback = "No drawing submitted."
             elif q["type"] == "math_input":
-                user_answer = st.session_state.get(f"math_{q['id']}", "")
-                ai_feedback = None
-                # First do basic keyword check
+                user_answer = st.session_state.get(f"ws_latex_{q['id']}", "")
                 basic_correct = check_answer(q, user_answer)
-                # Then get detailed AI evaluation if API key available
-                if gemini_key:
-                    with st.spinner("🤖 AI is reviewing your math..."):
+                if gemini_key and user_answer.strip():
+                    with st.spinner("🤖 AI reviewing your math..."):
                         result = evaluate_math_input(user_answer, q, gemini_key)
                     correct = result["correct"]
                     ai_feedback = result["feedback"]
                     st.session_state[f"math_score_{q['id']}"] = result["score"]
                 else:
                     correct = basic_correct
-                    ai_feedback = "⚠️ Add your Gemini API key in the **sidebar** (click the `>` arrow in the top-left) for detailed AI evaluation of your math. Using basic keyword matching for now."
+                    if not gemini_key:
+                        ai_feedback = "⚠️ Add Gemini API key for AI evaluation."
             else:
-                user_answer = None
                 correct = False
-                ai_feedback = None
 
             st.session_state.is_correct = correct
             st.session_state.show_explanation = True
             st.session_state[f"ai_feedback_{q['id']}"] = ai_feedback
-
             elapsed = round(time.time() - (st.session_state.question_start_time or time.time()))
-            st.session_state.history.append(
-                {
-                    "question_id": q["id"],
-                    "correct": correct if correct is not None else False,
-                    "level": q["level"],
-                    "time_taken": elapsed,
-                }
-            )
+            st.session_state.history.append({"question_id": q["id"], "correct": correct if correct is not None else False, "level": q["level"], "time_taken": elapsed})
             st.session_state.current_level = calculate_level(st.session_state.history)
             st.rerun()
 
@@ -1020,17 +846,15 @@ document.querySelectorAll('.katex-inline').forEach(function(el) {{
         if q["type"] == "multiple_choice":
             correct_letter = chr(65 + q["correct"])
             correct_text = q["options"][q["correct"]]
-            st.markdown(
-                f"**Correct answer: {correct_letter}. {correct_text}**"
-            )
+            st.markdown(f"**Correct answer: {correct_letter}.**")
+            st.components.v1.html(render_latex_question(correct_text, min_height=20), height=60, scrolling=False)
         elif q["type"] == "numerical":
             st.markdown(
                 f"**Correct answer: {q['correct']} {q.get('unit', '')}**"
             )
         elif q["type"] == "math_input" and q.get("expected_form"):
-            st.markdown(
-                f"**Expected form:** `{q['expected_form']}`"
-            )
+            st.markdown("**Expected form:**")
+            st.components.v1.html(render_latex_question(f"${q['expected_form']}$", min_height=20), height=50, scrolling=False)
 
         # Show AI feedback if available (for drawing and math questions)
         ai_feedback = st.session_state.get(f"ai_feedback_{q['id']}", None)
@@ -1054,14 +878,15 @@ document.querySelectorAll('.katex-inline').forEach(function(el) {{
                     unsafe_allow_html=True,
                 )
 
-        # Render explanation with LaTeX
+        # Render explanation with LaTeX (auto-resizing)
         st.markdown(
             f"""<div class="{css_class}" style="margin-top: 0.5rem;">
             <strong>📖 Full Explanation:</strong>
             </div>""",
             unsafe_allow_html=True,
         )
-        st.components.v1.html(render_latex_question(q['explanation']), height=120, scrolling=True)
+        expl_height = max(80, min(400, 40 + len(q['explanation']) // 2))
+        st.components.v1.html(render_latex_question(q['explanation'], min_height=40), height=expl_height, scrolling=False)
 
         btn_cols = st.columns([3, 1])
         with btn_cols[0]:
