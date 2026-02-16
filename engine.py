@@ -10,17 +10,35 @@ import random
 # RECOMMENDED TOPIC ORDER
 # ═══════════════════════════════════════
 TOPIC_ORDER = [
-    {"subtopic": "Definitions", "topic": "SHM", "label": "1. SHM Foundations"},
-    {"subtopic": "Period & Frequency", "topic": "SHM", "label": "2. Period & Frequency"},
-    {"subtopic": "Energy", "topic": "SHM", "label": "3. Energy in SHM"},
-    {"subtopic": "Equations of Motion", "topic": "SHM", "label": "4. Equations of Motion"},
-    {"subtopic": "Damped Oscillations", "topic": "SHM", "label": "5. Damped Oscillations"},
-    {"subtopic": "Coupled Oscillations", "topic": "SHM", "label": "6. Coupled Oscillators"},
-    {"subtopic": "Harmonics", "topic": "Standing Waves", "label": "7. Harmonics"},
-    {"subtopic": "Wave Speed", "topic": "Standing Waves", "label": "8. Wave Speed"},
-    {"subtopic": "Resonance", "topic": "Standing Waves", "label": "9. Resonance"},
-    {"subtopic": "Superposition", "topic": "Standing Waves", "label": "10. Superposition"},
-    {"subtopic": "Wave Equation", "topic": "Standing Waves", "label": "11. Wave Equation"},
+    # ── Oscillations ──
+    {"subtopic": "SHM Foundations", "topic": "Simple Harmonic Motion", "label": "1. SHM Foundations"},
+    {"subtopic": "SHM Energy", "topic": "Simple Harmonic Motion", "label": "2. SHM Energy"},
+    {"subtopic": "SHM Equations", "topic": "Simple Harmonic Motion", "label": "3. SHM Equations"},
+    {"subtopic": "Pendulum", "topic": "Pendulum & Mass-Spring", "label": "4. Pendulums"},
+    {"subtopic": "Mass-Spring", "topic": "Pendulum & Mass-Spring", "label": "5. Mass-Spring Systems"},
+    {"subtopic": "Waveform", "topic": "Waveform", "label": "6. Waveform Properties"},
+    {"subtopic": "Damped Oscillations", "topic": "Damped Oscillations", "label": "7. Damped Oscillations"},
+    {"subtopic": "Damped Pendulum", "topic": "Damped Oscillations", "label": "8. Damped Pendulum"},
+    # ── Waves ──
+    {"subtopic": "Waves on a String", "topic": "Waves on a String", "label": "9. Waves on a String"},
+    {"subtopic": "Standing Waves", "topic": "Standing Waves", "label": "10. Standing Waves"},
+    {"subtopic": "Sound Waves", "topic": "Sound Waves", "label": "11. Sound Waves"},
+    {"subtopic": "Doppler Effect", "topic": "Doppler Effect", "label": "12. Doppler Effect"},
+    {"subtopic": "Musical Instruments", "topic": "Musical Instruments", "label": "13. Musical Instruments"},
+    # ── Optics ──
+    {"subtopic": "Light as a Wave", "topic": "Light as a Wave", "label": "14. Light as a Wave"},
+    {"subtopic": "Angular Resolution", "topic": "Angular Resolution", "label": "15. Angular Resolution"},
+    {"subtopic": "Thin Film", "topic": "Thin Film", "label": "16. Thin Film Interference"},
+    {"subtopic": "Polarization", "topic": "Polarization", "label": "17. Polarization"},
+    # ── Modern Physics ──
+    {"subtopic": "Black Body", "topic": "Thermal Physics", "label": "18. Black Body Radiation"},
+    {"subtopic": "Photoelectric", "topic": "Light as a Particle", "label": "19. Photoelectric Effect"},
+    {"subtopic": "Photon Energy", "topic": "Light as a Particle", "label": "20. Photon Energy & Momentum"},
+    {"subtopic": "Radioactive Decay", "topic": "Radioactivity", "label": "21. Radioactive Decay"},
+    {"subtopic": "Nuclear Reactions", "topic": "Radioactivity", "label": "22. Nuclear Reactions"},
+    {"subtopic": "Time Dilation", "topic": "Relativity", "label": "23. Time Dilation"},
+    {"subtopic": "Length Contraction", "topic": "Relativity", "label": "24. Length Contraction"},
+    {"subtopic": "Relativistic Energy", "topic": "Relativity", "label": "25. Relativistic Energy"},
 ]
 
 # Mastery threshold: need this many correct out of attempted to be "mastered"
